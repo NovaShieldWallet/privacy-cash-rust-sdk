@@ -1,5 +1,5 @@
 [package]
-name = "privacy-cash"
+name = "privacy-cash-sdk"
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.70"
@@ -7,7 +7,7 @@ authors = ["Nova Shield <team@nshield.org>"]
 description = "Rust SDK for Privacy Cash - Privacy-preserving transactions on Solana using Zero-Knowledge Proofs. Created by Nova Shield."
 license = "MIT"
 repository = "https://github.com/NovaShieldWallet/privacy-cash-rust-sdk"
-documentation = "https://docs.rs/privacy-cash"
+documentation = "https://docs.rs/privacy-cash-sdk"
 homepage = "https://nshield.org"
 readme = "README.md"
 keywords = ["solana", "privacy", "zk-proofs", "cryptocurrency", "defi"]

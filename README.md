@@ -1,7 +1,7 @@
 # Privacy Cash Rust SDK
 
-[![Crates.io](https://img.shields.io/crates/v/privacy-cash.svg)](https://crates.io/crates/privacy-cash)
-[![Documentation](https://docs.rs/privacy-cash/badge.svg)](https://docs.rs/privacy-cash)
+[![Crates.io](https://img.shields.io/crates/v/privacy-cash-sdk.svg)](https://crates.io/crates/privacy-cash-sdk)
+[![Documentation](https://docs.rs/privacy-cash-sdk/badge.svg)](https://docs.rs/privacy-cash-sdk)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 Rust SDK for [Privacy Cash](https://privacycash.org) - Privacy-preserving transactions on Solana using Zero-Knowledge Proofs.
@@ -25,7 +25,7 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-privacy-cash = "0.1"
+privacy-cash-sdk = "0.1"
 ```
 
 ### Prerequisites
