@@ -22,19 +22,20 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-privacy-cash = { git = "https://github.com/Nova-Shield/privacy-cash-rust-sdk" }
+privacy-cash = { git = "https://github.com/NovaShieldWallet/privacy-cash-rust-sdk" }
 tokio = { version = "1", features = ["full"] }
 ```
 
 ### Circuit Files (Required)
 
-Download the circuit files (~60MB total):
+The SDK requires circuit files for ZK proof generation. Create a `circuit` directory and add the required files:
 
 ```bash
 mkdir -p circuit
-curl -L -o circuit/transaction2.wasm "https://privacy.cash/circuits/transaction2.wasm"
-curl -L -o circuit/transaction2.zkey "https://privacy.cash/circuits/transaction2.zkey"
+# Add transaction2.wasm and transaction2.zkey to the circuit directory
 ```
+
+**Note:** Contact [Nova Shield](https://nshield.org) or check the project releases for circuit file distribution.
 
 ## Quick Start - ONE Function!
 
