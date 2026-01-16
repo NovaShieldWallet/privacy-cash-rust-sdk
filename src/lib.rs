@@ -57,7 +57,7 @@ pub mod withdraw_spl;
 
 // Re-export main types
 pub use client::PrivacyCash;
-pub use config::Config;
+pub use config::{Config, SupportedToken};
 pub use constants::*;
 pub use error::{PrivacyCashError, Result};
 pub use keypair::ZkKeypair;

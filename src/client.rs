@@ -615,6 +615,63 @@ impl PrivacyCash {
         *NOVA_SHIELD_FEE_RATE
     }
 
+    // ============ Token Support (Dynamic) ============
+
+    /// Get list of all supported token names
+    /// 
+    /// This fetches dynamically from the Privacy Cash API, so new tokens
+    /// are automatically supported when Privacy Cash adds them.
+    /// 
+    /// # Example
+    /// ```rust,no_run
+    /// # async fn example(client: &privacy_cash::PrivacyCash) -> privacy_cash::Result<()> {
+    /// let tokens = client.get_supported_tokens().await?;
+    /// for token in tokens {
+    ///     println!("{}: min={}, rent_fee={}, price=${:.2}",
+    ///         token.name, token.min_withdrawal, token.rent_fee, token.price_usd);
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn get_supported_tokens(&self) -> Result<Vec<crate::config::SupportedToken>> {
+        crate::config::Config::get_supported_tokens().await
+    }
+
+    /// Get list of supported token names
+    pub async fn get_supported_token_names(&self) -> Result<Vec<String>> {
+        crate::config::Config::get_supported_token_names().await
+    }
+
+    /// Check if a token is supported
+    /// 
+    /// # Example
+    /// ```rust,no_run
+    /// # async fn example(client: &privacy_cash::PrivacyCash) -> privacy_cash::Result<()> {
+    /// if client.is_token_supported("usdc").await? {
+    ///     println!("USDC is supported!");
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn is_token_supported(&self, token_name: &str) -> Result<bool> {
+        crate::config::Config::is_token_supported(token_name).await
+    }
+
+    /// Get minimum withdrawal amount for a token
+    pub async fn get_minimum_withdrawal(&self, token_name: &str) -> Result<f64> {
+        crate::config::Config::get_minimum_withdrawal(token_name).await
+    }
+
+    /// Get current token price in USD
+    pub async fn get_token_price(&self, token_name: &str) -> Result<f64> {
+        crate::config::Config::get_token_price(token_name).await
+    }
+
+    /// Get Privacy Cash configuration (fees, minimums, etc.)
+    pub async fn get_config(&self) -> Result<crate::config::Config> {
+        crate::config::Config::get().await
+    }
+
     // ============ Utility Methods ============
 
     /// Get the Solana RPC client
