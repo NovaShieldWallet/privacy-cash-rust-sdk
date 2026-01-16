@@ -3,16 +3,14 @@
 //! Implements a Poseidon-based keypair system for UTXO ownership.
 //! Based on Tornado Cash Nova's approach.
 //!
-//! Note: For full compatibility with the TypeScript SDK, the Poseidon hash
-//! implementation should match snarkjs's Poseidon. This implementation uses
-//! a placeholder that can be replaced with the actual circom-compatible
-//! Poseidon hash.
+//! Uses native Poseidon implementation compatible with circom circuits.
 
 use crate::constants::FIELD_SIZE;
 use crate::error::{PrivacyCashError, Result};
+use crate::poseidon::{Poseidon, PoseidonHasher};
+use ark_bn254::Fr;
+use ark_ff::{BigInteger, PrimeField};
 use num_bigint::BigUint;
-use num_traits::Zero;
-use sha3::{Digest, Keccak256};
 
 /// ZK Keypair for UTXO ownership
 ///
@@ -48,7 +46,7 @@ impl ZkKeypair {
         // Reduce modulo field size
         let privkey = raw_decimal % &*FIELD_SIZE;
 
-        // Compute public key using Poseidon hash
+        // Compute public key using native Poseidon hash
         let pubkey = Self::poseidon_hash(&[privkey.clone()])?;
 
         Ok(Self { privkey, pubkey })
@@ -110,35 +108,40 @@ impl ZkKeypair {
         Ok(result.to_string())
     }
 
-    /// Compute Poseidon hash of multiple inputs
+    /// Compute Poseidon hash of multiple inputs using native implementation
     ///
-    /// NOTE: This is a placeholder implementation using Keccak256.
-    /// For full compatibility with the ZK circuits, this should be replaced
-    /// with a proper BN254 Poseidon implementation matching snarkjs.
-    ///
-    /// For production use, consider:
-    /// 1. Using the TypeScript SDK for operations requiring proof generation
-    /// 2. Implementing native Poseidon using ark-circom (requires resolving dependency conflicts)
-    /// 3. Using FFI to call the WASM Poseidon hasher from @lightprotocol/hasher.rs
+    /// This uses the circom-compatible Poseidon hash with BN254 curve parameters.
     pub fn poseidon_hash(inputs: &[BigUint]) -> Result<BigUint> {
-        // Create a deterministic hash from inputs
-        // This placeholder uses Keccak256 and reduces modulo field size
-        let mut hasher = Keccak256::new();
-
-        for input in inputs {
-            // Pad each input to 32 bytes (little-endian)
-            let bytes = input.to_bytes_le();
-            let mut padded = [0u8; 32];
-            let len = bytes.len().min(32);
-            padded[..len].copy_from_slice(&bytes[..len]);
-            hasher.update(padded);
+        let num_inputs = inputs.len();
+        if num_inputs == 0 || num_inputs > 12 {
+            return Err(PrivacyCashError::InvalidKeypair(
+                format!("Invalid number of inputs: {}. Must be 1-12.", num_inputs)
+            ));
         }
 
-        let result = hasher.finalize();
-        let hash_bigint = BigUint::from_bytes_be(&result);
+        // Convert BigUint inputs to Fr field elements
+        let fr_inputs: Vec<Fr> = inputs
+            .iter()
+            .map(|input| {
+                let bytes = input.to_bytes_be();
+                let mut padded = [0u8; 32];
+                let start = 32usize.saturating_sub(bytes.len());
+                let len = bytes.len().min(32);
+                padded[start..start + len].copy_from_slice(&bytes[..len]);
+                Fr::from_be_bytes_mod_order(&padded)
+            })
+            .collect();
 
-        // Reduce modulo field size to ensure it's a valid field element
-        Ok(hash_bigint % &*FIELD_SIZE)
+        // Create Poseidon hasher and compute hash
+        let mut poseidon = Poseidon::<Fr>::new_circom(num_inputs)
+            .map_err(|e| PrivacyCashError::InvalidKeypair(format!("Poseidon error: {:?}", e)))?;
+        
+        let hash = poseidon.hash(&fr_inputs)
+            .map_err(|e| PrivacyCashError::InvalidKeypair(format!("Poseidon hash error: {:?}", e)))?;
+
+        // Convert Fr back to BigUint
+        let result_bytes = hash.into_bigint().to_bytes_be();
+        Ok(BigUint::from_bytes_be(&result_bytes))
     }
 
     /// Compute Poseidon hash from string inputs (for compatibility with JS SDK)
@@ -159,6 +162,7 @@ impl ZkKeypair {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use num_traits::Zero;
 
     #[test]
     fn test_keypair_generation() {
@@ -176,7 +180,7 @@ mod tests {
     }
 
     #[test]
-    fn test_poseidon_hash() {
+    fn test_poseidon_hash_consistency() {
         // Test that poseidon hash produces consistent output
         let input = BigUint::from(12345u64);
         let result1 = ZkKeypair::poseidon_hash(&[input.clone()]).unwrap();
@@ -186,8 +190,21 @@ mod tests {
 
     #[test]
     fn test_poseidon_hash_strings() {
-        let inputs = &["123", "456", "789"];
+        let inputs = &["123", "456"];
         let result = ZkKeypair::poseidon_hash_strings(inputs).unwrap();
         assert!(!result.is_empty());
+        
+        // Verify it's a valid decimal number
+        let parsed = BigUint::parse_bytes(result.as_bytes(), 10);
+        assert!(parsed.is_some());
+    }
+
+    #[test]
+    fn test_keypair_deterministic() {
+        // Same private key should produce same public key
+        let hex_key = "0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890";
+        let keypair1 = ZkKeypair::from_hex(hex_key).unwrap();
+        let keypair2 = ZkKeypair::from_hex(hex_key).unwrap();
+        assert_eq!(keypair1.pubkey(), keypair2.pubkey());
     }
 }

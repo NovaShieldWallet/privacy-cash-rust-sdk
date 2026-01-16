@@ -49,6 +49,7 @@ pub mod get_utxos;
 pub mod get_utxos_spl;
 pub mod keypair;
 pub mod merkle_tree;
+pub mod poseidon;
 pub mod prover;
 pub mod storage;
 pub mod utxo;
