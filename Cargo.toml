@@ -2,21 +2,26 @@
 name = "privacy-cash"
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.70"
 authors = ["Nova Shield <team@nshield.org>"]
-description = "Rust SDK for Privacy Cash - Privacy-preserving transactions on Solana using Zero-Knowledge Proofs"
+description = "Rust SDK for Privacy Cash - Privacy-preserving transactions on Solana using Zero-Knowledge Proofs. Created by Nova Shield."
 license = "MIT"
-repository = "https://github.com/Privacy-Cash/privacy-cash-rust-sdk"
+repository = "https://github.com/NovaShieldWallet/privacy-cash-rust-sdk"
 documentation = "https://docs.rs/privacy-cash"
 homepage = "https://nshield.org"
 readme = "README.md"
 keywords = ["solana", "privacy", "zk-proofs", "cryptocurrency", "defi"]
 categories = ["cryptography", "api-bindings", "finance"]
-exclude = [
-    "typescript-reference/**",
-    "cache/**",
-    "target/**",
-    "*.ts",
-    ".git/**",
+include = [
+    "src/**/*",
+    "examples/**/*",
+    "ts-bridge/cli.ts",
+    "ts-bridge/package.json",
+    "ts-bridge/package-lock.json",
+    "ts-bridge/.gitignore",
+    "Cargo.toml",
+    "LICENSE",
+    "README.md",
 ]
 
 [lib]
@@ -34,6 +39,18 @@ path = "examples/check_balance.rs"
 [[example]]
 name = "test_deposit"
 path = "examples/test_deposit.rs"
+
+[[example]]
+name = "send_privately"
+path = "examples/send_privately.rs"
+
+[[example]]
+name = "test_bridge"
+path = "examples/test_bridge.rs"
+
+[[example]]
+name = "withdraw_all_bridge"
+path = "examples/withdraw_all_bridge.rs"
 
 [dependencies]
 # Solana dependencies - using 2.x
@@ -83,3 +100,7 @@ dotenv = "0.15"
 default = []
 # Enable verbose debug logging
 debug = []
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
