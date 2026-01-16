@@ -14,24 +14,19 @@ Rust SDK for [Privacy Cash](https://privacycash.org) - Privacy-preserving transa
 
 - 🔒 **Private Transactions**: Send SOL and SPL tokens with complete privacy
 - 🛡️ **Zero-Knowledge Proofs**: Industry-standard ZK-SNARKs for transaction privacy
-- 💰 **Multi-Token Support**: SOL, USDC, USDT, and more
-- ⚡ **Async/Await**: Built on Tokio for high-performance async operations
+- 💰 **Multi-Token Support**: SOL, USDC, USDT, and more (dynamically fetched)
+- ⚡ **Simple API**: One function `send_privately()` for privacy transfers
 - 🔐 **Local Key Management**: Private keys never leave your machine
+- 💵 **Nova Shield Fee**: 1% fee on withdrawals supports Nova Shield development
 
-## Supported Tokens
+## Fee Structure
 
-| Token | Minimum Withdrawal | Rent Fee |
-|-------|-------------------|----------|
-| SOL   | 0.01 SOL          | 0.006 SOL |
-| USDC  | 2 USDC            | ~0.85 USDC |
-| USDT  | 2 USDT            | ~0.85 USDT |
-| ZEC   | 0.01 ZEC          | ~0.002 ZEC |
-| ORE   | 0.02 ORE          | ~0.007 ORE |
-| STORE | 0.02 STORE        | ~0.007 STORE |
+| Operation | Privacy Cash Fee | Nova Shield Fee | Total |
+|-----------|-----------------|-----------------|-------|
+| Deposit   | 0% (FREE)       | 0%              | 0%    |
+| Withdraw  | 0.35% + rent    | 1%              | ~1.35% + rent |
 
-**Fee Structure:**
-- Deposit Fee: **0%** (FREE)
-- Withdrawal Fee: **0.35%** of amount + rent fee
+**Nova Shield Fee Wallet:** `HKBrbp3h8B9tMCn4ceKCtmF8jWxvpfrb7YNLbCgxLUJL`
 
 ## Installation
 
@@ -44,141 +39,146 @@ privacy-cash = "0.1"
 
 ### Prerequisites
 
-For deposit/withdrawal operations, you need `snarkjs` installed:
+**Node.js is required** for ZK proof generation:
 
 ```bash
-npm install -g snarkjs
+# Install Node.js (if not installed)
+# macOS: brew install node
+# Ubuntu: apt install nodejs npm
+
+# Install TypeScript bridge dependencies
+cd path/to/privacy-cash-rust-sdk/ts-bridge
+npm install
 ```
 
-Download the circuit files (required for ZK proof generation):
+## Quick Start - Send Privately
 
-```bash
-mkdir -p circuit
-curl -L https://raw.githubusercontent.com/Privacy-Cash/privacy-cash-sdk/main/circuit2/transaction2.wasm -o circuit/transaction2.wasm
-curl -L https://raw.githubusercontent.com/Privacy-Cash/privacy-cash-sdk/main/circuit2/transaction2.zkey -o circuit/transaction2.zkey
-```
-
-## Quick Start
+The main function for privacy transfers:
 
 ```rust
-use privacy_cash::PrivacyCash;
-use solana_sdk::signature::Keypair;
+use privacy_cash::bridge::send_privately;
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Load your keypair (NEVER hardcode private keys!)
-    let private_key = std::env::var("SOLANA_PRIVATE_KEY")?;
-    let key_bytes = bs58::decode(&private_key).into_vec()?;
-    let keypair = Keypair::from_bytes(&key_bytes)?;
+fn main() {
+    // Send 0.01 SOL privately
+    let result = send_privately(
+        "https://api.mainnet-beta.solana.com",
+        "your_private_key_base58",
+        10_000_000, // 0.01 SOL in lamports
+        "recipient_pubkey_base58",
+    ).unwrap();
 
-    // Create client
-    let client = PrivacyCash::new("https://api.mainnet-beta.solana.com", keypair)?;
-
-    // Check private balance
-    let balance = client.get_private_balance().await?;
-    println!("Private SOL: {} lamports", balance.lamports);
-
-    // Deposit 0.01 SOL (10,000,000 lamports)
-    let deposit = client.deposit(10_000_000).await?;
-    println!("Deposit tx: {}", deposit.signature);
-
-    // Withdraw 0.005 SOL to self
-    let withdraw = client.withdraw(5_000_000, None).await?;
-    println!("Withdraw tx: {}", withdraw.signature);
-
-    Ok(())
+    println!("Deposit TX: {}", result.deposit_signature);
+    println!("Withdraw TX: {}", result.withdraw_signature);
+    println!("Nova Shield fee: {} lamports (1%)", result.nova_shield_fee);
 }
+```
+
+This single function:
+1. ✅ Deposits into Privacy Cash
+2. ✅ Collects 1% Nova Shield fee
+3. ✅ Withdraws to recipient privately
+
+## API Reference
+
+### Send Privately (Main Function)
+
+```rust
+use privacy_cash::bridge::{send_privately, send_privately_spl};
+
+// Send SOL privately
+let result = send_privately(rpc_url, private_key, lamports, recipient)?;
+
+// Send SPL tokens privately (e.g., USDC)
+let usdc_mint = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+let result = send_privately_spl(rpc_url, private_key, base_units, usdc_mint, recipient)?;
+```
+
+### Check Balances
+
+```rust
+use privacy_cash::bridge::{ts_get_balance, ts_get_balance_spl};
+
+// Get private SOL balance
+let balance = ts_get_balance(rpc_url, private_key)?;
+println!("Private SOL: {} lamports", balance.lamports);
+
+// Get private USDC balance
+let usdc_mint = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+let balance = ts_get_balance_spl(rpc_url, private_key, usdc_mint)?;
+println!("Private USDC: {} base units", balance.base_units);
+```
+
+### Deposit & Withdraw (Individual Operations)
+
+```rust
+use privacy_cash::bridge::{
+    ts_deposit, ts_withdraw, ts_withdraw_all,
+    ts_deposit_spl, ts_withdraw_spl, ts_withdraw_all_spl,
+};
+
+// Deposit SOL
+let result = ts_deposit(rpc_url, private_key, lamports)?;
+
+// Withdraw SOL (Nova Shield 1% fee collected automatically)
+let result = ts_withdraw(rpc_url, private_key, lamports, Some(recipient))?;
+
+// Withdraw ALL private SOL
+let result = ts_withdraw_all(rpc_url, private_key, None)?;
+
+// SPL tokens
+let result = ts_deposit_spl(rpc_url, private_key, base_units, mint)?;
+let result = ts_withdraw_spl(rpc_url, private_key, base_units, mint, recipient)?;
+let result = ts_withdraw_all_spl(rpc_url, private_key, mint, recipient)?;
+```
+
+### Fee Utilities
+
+```rust
+use privacy_cash::bridge::{
+    calculate_nova_shield_fee,
+    get_nova_shield_fee_rate,
+    get_nova_shield_fee_wallet,
+};
+
+let fee = calculate_nova_shield_fee(10_000_000); // 100,000 lamports (1%)
+let rate = get_nova_shield_fee_rate(); // 0.01
+let wallet = get_nova_shield_fee_wallet(); // "HKBrbp3h8B9tMCn4ceKCtmF8jWxvpfrb7YNLbCgxLUJL"
 ```
 
 ## Examples
 
-### Check Balances (Safe - No Transactions)
+### Check Balances
 
 ```bash
-SOLANA_PRIVATE_KEY="your-base58-key" cargo run --example check_balance
+SOLANA_PRIVATE_KEY="your-key" cargo run --example send_privately
 ```
 
-### Deposit SOL
+### Send Privately
 
 ```bash
-SOLANA_PRIVATE_KEY="your-base58-key" cargo run --example test_deposit
+SOLANA_PRIVATE_KEY="your-key" cargo run --example send_privately -- 0.01 RecipientPubkey
 ```
 
-### Full Example
+### Withdraw All
 
 ```bash
-SOLANA_PRIVATE_KEY="your-base58-key" cargo run --example basic_usage
+SOLANA_PRIVATE_KEY="your-key" cargo run --example withdraw_all_bridge
 ```
 
-## API Reference
+## Supported Tokens (Dynamic)
 
-### Creating a Client
+Tokens are fetched dynamically from the Privacy Cash API:
 
-```rust
-// Basic client
-let client = PrivacyCash::new(rpc_url, keypair)?;
+| Token | Minimum Withdrawal | Rent Fee |
+|-------|-------------------|----------|
+| SOL   | 0.01 SOL          | ~0.006 SOL |
+| USDC  | 2 USDC            | ~0.85 USDC |
+| USDT  | 2 USDT            | ~0.85 USDT |
+| ZEC   | 0.01 ZEC          | ~0.002 ZEC |
+| ORE   | 0.02 ORE          | ~0.007 ORE |
+| STORE | 0.02 STORE        | ~0.007 STORE |
 
-// With custom circuit path
-let client = PrivacyCash::with_options(
-    rpc_url,
-    keypair,
-    None,  // Optional storage path
-    Some("./circuit/transaction2".to_string()),
-)?;
-```
-
-### Balance Methods
-
-```rust
-// On-chain SOL balance
-let balance = client.get_sol_balance()?;
-
-// Private SOL balance
-let private_sol = client.get_private_balance().await?;
-
-// Private USDC balance
-let private_usdc = client.get_private_balance_usdc().await?;
-
-// Private balance for any SPL token
-let mint = Pubkey::from_str("...")?;
-let balance = client.get_private_balance_spl(&mint).await?;
-```
-
-### Deposit Methods
-
-```rust
-// Deposit SOL (amount in lamports)
-let result = client.deposit(10_000_000).await?;
-
-// Deposit USDC (amount in base units, 1 USDC = 1,000,000)
-let result = client.deposit_usdc(1_000_000).await?;
-
-// Deposit any SPL token
-let result = client.deposit_spl(amount, &mint).await?;
-```
-
-### Withdraw Methods
-
-```rust
-// Withdraw SOL (amount in lamports)
-// recipient: None = withdraw to self
-let result = client.withdraw(5_000_000, None).await?;
-
-// Withdraw to specific address
-let recipient = Pubkey::from_str("...")?;
-let result = client.withdraw(5_000_000, Some(&recipient)).await?;
-
-// Withdraw USDC
-let result = client.withdraw_usdc(500_000, None).await?;
-
-// Withdraw any SPL token
-let result = client.withdraw_spl(amount, &mint, None).await?;
-
-// ⭐ WITHDRAW ALL - Simple one-call withdrawal of entire balance
-let result = client.withdraw_all(None).await?;           // All SOL
-let result = client.withdraw_all_usdc(None).await?;      // All USDC
-let result = client.withdraw_all_spl(&mint, None).await?; // All of any token
-```
+New tokens are automatically supported when Privacy Cash adds them.
 
 ## Security
 
@@ -191,10 +191,34 @@ let result = client.withdraw_all_spl(&mint, None).await?; // All of any token
 
 ## How It Works
 
-1. **Deposit**: Your tokens are deposited into the Privacy Cash program, and an encrypted UTXO is created
-2. **ZK Proof**: A zero-knowledge proof is generated proving you own the UTXO without revealing which one
-3. **Withdraw**: The proof is verified on-chain, and tokens are sent to the recipient
-4. **Privacy**: The link between deposit and withdrawal is cryptographically hidden
+1. **Deposit**: Tokens are deposited into Privacy Cash, creating an encrypted UTXO
+2. **ZK Proof**: A zero-knowledge proof is generated client-side
+3. **Nova Shield Fee**: 1% fee is collected to support development
+4. **Withdraw**: Proof is verified on-chain, tokens sent to recipient
+5. **Privacy**: Link between deposit and withdrawal is cryptographically hidden
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                     Your Rust Application                   │
+├─────────────────────────────────────────────────────────────┤
+│                  privacy-cash (Rust crate)                  │
+│  ┌──────────────────────────────────────────────────────┐  │
+│  │                    bridge module                      │  │
+│  │  send_privately() → ts_deposit() → ts_withdraw()     │  │
+│  └──────────────────────────────────────────────────────┘  │
+├─────────────────────────────────────────────────────────────┤
+│              ts-bridge/ (TypeScript CLI)                    │
+│  ┌──────────────────────────────────────────────────────┐  │
+│  │  privacy-cash-sdk (npm) + ZK proof generation        │  │
+│  │  Nova Shield 1% fee collection                       │  │
+│  └──────────────────────────────────────────────────────┘  │
+├─────────────────────────────────────────────────────────────┤
+│                   Privacy Cash Protocol                     │
+│                    (Solana on-chain)                        │
+└─────────────────────────────────────────────────────────────┘
+```
 
 ## License
 
@@ -208,4 +232,3 @@ See [LICENSE](LICENSE) for details.
 - [Nova for Solana - iOS App](https://apps.apple.com/us/app/nova-for-solana/id6753857720) - Download on the App Store
 - [Privacy Cash Protocol](https://privacycash.org) - The underlying privacy protocol
 - [Privacy Cash TypeScript SDK](https://github.com/Privacy-Cash/privacy-cash-sdk)
-- [Security Audits](https://github.com/Privacy-Cash/privacy-cash-sdk/tree/main/audits)
