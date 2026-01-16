@@ -17,16 +17,7 @@ Rust SDK for [Privacy Cash](https://privacycash.org) - Privacy-preserving transa
 - 💰 **Multi-Token Support**: SOL, USDC, USDT, and more (dynamically fetched)
 - ⚡ **Simple API**: One function `send_privately()` for privacy transfers
 - 🔐 **Local Key Management**: Private keys never leave your machine
-- 💵 **Nova Shield Fee**: 1% fee on withdrawals supports Nova Shield development
-
-## Fee Structure
-
-| Operation | Privacy Cash Fee | Nova Shield Fee | Total |
-|-----------|-----------------|-----------------|-------|
-| Deposit   | 0% (FREE)       | 0%              | 0%    |
-| Withdraw  | 0.35% + rent    | 1%              | ~1.35% + rent |
-
-**Nova Shield Fee Wallet:** `HKBrbp3h8B9tMCn4ceKCtmF8jWxvpfrb7YNLbCgxLUJL`
+- 🔧 **Customizable**: Add your own platform fees on transactions
 
 ## Installation
 
@@ -69,14 +60,12 @@ fn main() {
 
     println!("Deposit TX: {}", result.deposit_signature);
     println!("Withdraw TX: {}", result.withdraw_signature);
-    println!("Nova Shield fee: {} lamports (1%)", result.nova_shield_fee);
 }
 ```
 
 This single function:
 1. ✅ Deposits into Privacy Cash
-2. ✅ Collects 1% Nova Shield fee
-3. ✅ Withdraws to recipient privately
+2. ✅ Withdraws to recipient privately
 
 ## API Reference
 
@@ -119,7 +108,7 @@ use privacy_cash::bridge::{
 // Deposit SOL
 let result = ts_deposit(rpc_url, private_key, lamports)?;
 
-// Withdraw SOL (Nova Shield 1% fee collected automatically)
+// Withdraw SOL
 let result = ts_withdraw(rpc_url, private_key, lamports, Some(recipient))?;
 
 // Withdraw ALL private SOL
@@ -129,20 +118,6 @@ let result = ts_withdraw_all(rpc_url, private_key, None)?;
 let result = ts_deposit_spl(rpc_url, private_key, base_units, mint)?;
 let result = ts_withdraw_spl(rpc_url, private_key, base_units, mint, recipient)?;
 let result = ts_withdraw_all_spl(rpc_url, private_key, mint, recipient)?;
-```
-
-### Fee Utilities
-
-```rust
-use privacy_cash::bridge::{
-    calculate_nova_shield_fee,
-    get_nova_shield_fee_rate,
-    get_nova_shield_fee_wallet,
-};
-
-let fee = calculate_nova_shield_fee(10_000_000); // 100,000 lamports (1%)
-let rate = get_nova_shield_fee_rate(); // 0.01
-let wallet = get_nova_shield_fee_wallet(); // "HKBrbp3h8B9tMCn4ceKCtmF8jWxvpfrb7YNLbCgxLUJL"
 ```
 
 ## Examples
@@ -193,9 +168,8 @@ New tokens are automatically supported when Privacy Cash adds them.
 
 1. **Deposit**: Tokens are deposited into Privacy Cash, creating an encrypted UTXO
 2. **ZK Proof**: A zero-knowledge proof is generated client-side
-3. **Nova Shield Fee**: 1% fee is collected to support development
-4. **Withdraw**: Proof is verified on-chain, tokens sent to recipient
-5. **Privacy**: Link between deposit and withdrawal is cryptographically hidden
+3. **Withdraw**: Proof is verified on-chain, tokens sent to recipient
+4. **Privacy**: Link between deposit and withdrawal is cryptographically hidden
 
 ## Architecture
 
@@ -212,7 +186,6 @@ New tokens are automatically supported when Privacy Cash adds them.
 │              ts-bridge/ (TypeScript CLI)                    │
 │  ┌──────────────────────────────────────────────────────┐  │
 │  │  privacy-cash-sdk (npm) + ZK proof generation        │  │
-│  │  Nova Shield 1% fee collection                       │  │
 │  └──────────────────────────────────────────────────────┘  │
 ├─────────────────────────────────────────────────────────────┤
 │                   Privacy Cash Protocol                     │
