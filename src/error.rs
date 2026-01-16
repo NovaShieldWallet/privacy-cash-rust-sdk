@@ -12,6 +12,10 @@ pub enum PrivacyCashError {
     #[error("Invalid keypair: {0}")]
     InvalidKeypair(String),
 
+    /// Invalid input parameter
+    #[error("Invalid input: {0}")]
+    InvalidInput(String),
+
     /// Insufficient balance for operation
     #[error("Insufficient balance: have {have} lamports, need {need} lamports")]
     InsufficientBalance { have: u64, need: u64 },

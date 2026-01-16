@@ -290,40 +290,53 @@ impl Prover {
 }
 
 /// Parse proof to bytes array for on-chain submission
+/// 
+/// Matches the TypeScript SDK's parseProofToBytesArray function:
+/// - pi_a, pi_c: Each coordinate is LE bytes then reversed to BE
+/// - pi_b: Each coordinate is LE bytes, then the entire 64-byte chunk is reversed
 pub fn parse_proof_to_bytes(proof: &Proof) -> Result<ProofBytes> {
-    let parse_coord = |s: &str| -> Result<Vec<u8>> {
+    // For pi_a and pi_c: convert to LE then reverse to BE
+    let parse_coord_be = |s: &str| -> Result<Vec<u8>> {
         let n = BigUint::parse_bytes(s.as_bytes(), 10)
             .ok_or_else(|| PrivacyCashError::SerializationError("Invalid coordinate".to_string()))?;
         let bytes = biguint_to_bytes_le(&n);
-        // Reverse for big-endian format expected by Solana program
+        // Reverse for big-endian format
         Ok(bytes.iter().rev().cloned().collect())
     };
+    
+    // For pi_b: convert to LE, keep as LE (no reverse per element)
+    let parse_coord_le = |s: &str| -> Result<Vec<u8>> {
+        let n = BigUint::parse_bytes(s.as_bytes(), 10)
+            .ok_or_else(|| PrivacyCashError::SerializationError("Invalid coordinate".to_string()))?;
+        Ok(biguint_to_bytes_le(&n).to_vec())
+    };
 
-    // Proof A: [x, y] flattened
+    // Proof A: [x, y] flattened, each coord is BE
     let mut proof_a = Vec::new();
-    proof_a.extend(parse_coord(&proof.pi_a[0])?);
-    proof_a.extend(parse_coord(&proof.pi_a[1])?);
+    proof_a.extend(parse_coord_be(&proof.pi_a[0])?);
+    proof_a.extend(parse_coord_be(&proof.pi_a[1])?);
 
-    // Proof B: [[x1, x2], [y1, y2]] flattened and reversed
+    // Proof B: The on-chain verifier uses change_endianness which reverses EACH 32-byte chunk
+    // snarkjs pi_b format: [[x.c1, x.c0], [y.c1, y.c0], [1, 0]]
+    // On-chain expects: [x.c1_be, x.c0_be, y.c1_be, y.c0_be] (each 32 bytes in BE)
     let mut proof_b = Vec::new();
-    let b_x: Vec<u8> = proof.pi_b[0]
-        .iter()
-        .flat_map(|s| parse_coord(s).unwrap())
-        .collect();
-    let b_y: Vec<u8> = proof.pi_b[1]
-        .iter()
-        .flat_map(|s| parse_coord(s).unwrap())
-        .collect();
-    // Reverse order for Solana
-    let b_x_rev: Vec<u8> = b_x.chunks(32).rev().flatten().cloned().collect();
-    let b_y_rev: Vec<u8> = b_y.chunks(32).rev().flatten().cloned().collect();
-    proof_b.extend(b_x_rev);
-    proof_b.extend(b_y_rev);
+    
+    // Process x coordinate (pi_b[0] = [c1, c0] in snarkjs format)
+    // Output order: c1, c0 (same as input, but each in BE)
+    for coord in &proof.pi_b[0] {
+        proof_b.extend(parse_coord_be(coord)?);
+    }
+    
+    // Process y coordinate (pi_b[1] = [c1, c0] in snarkjs format)
+    // Output order: c1, c0 (same as input, but each in BE)
+    for coord in &proof.pi_b[1] {
+        proof_b.extend(parse_coord_be(coord)?);
+    }
 
-    // Proof C: [x, y] flattened
+    // Proof C: [x, y] flattened, each coord is BE
     let mut proof_c = Vec::new();
-    proof_c.extend(parse_coord(&proof.pi_c[0])?);
-    proof_c.extend(parse_coord(&proof.pi_c[1])?);
+    proof_c.extend(parse_coord_be(&proof.pi_c[0])?);
+    proof_c.extend(parse_coord_be(&proof.pi_c[1])?);
 
     Ok(ProofBytes {
         proof_a,

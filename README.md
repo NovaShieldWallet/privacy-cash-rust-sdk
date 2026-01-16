@@ -1,23 +1,20 @@
 # Privacy Cash Rust SDK
 
-[![Crates.io](https://img.shields.io/crates/v/privacy-cash-sdk.svg)](https://crates.io/crates/privacy-cash-sdk)
-[![Documentation](https://docs.rs/privacy-cash-sdk/badge.svg)](https://docs.rs/privacy-cash-sdk)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-Rust SDK for [Privacy Cash](https://privacycash.org) - Privacy-preserving transactions on Solana using Zero-Knowledge Proofs.
+**Pure Rust** SDK for [Privacy Cash](https://privacycash.org) - Privacy-preserving transactions on Solana using Zero-Knowledge Proofs.
+
+**iOS Compatible** - No Node.js required!
 
 **Created by [Nova Shield](https://nshield.org)**
 
-[![Download on App Store](https://img.shields.io/badge/Download_on_the-App_Store-black?logo=apple&logoColor=white)](https://apps.apple.com/us/app/nova-for-solana/id6753857720)
-
 ## Features
 
-- 🔒 **Private Transactions**: Send SOL and SPL tokens with complete privacy
-- 🛡️ **Zero-Knowledge Proofs**: Industry-standard ZK-SNARKs for transaction privacy
-- 💰 **Multi-Token Support**: SOL, USDC, USDT, and more (dynamically fetched)
-- ⚡ **Simple API**: One function `send_privately()` for privacy transfers
-- 🔐 **Local Key Management**: Private keys never leave your machine
-- 🔧 **Customizable**: Add your own platform fees on transactions
+- Private Transactions - Send SOL and SPL tokens with complete privacy
+- Pure Rust ZK Proofs - Native Groth16 proof generation
+- iOS Compatible - Use as a Rust crate in mobile apps
+- Multi-Token Support - SOL, USDC, USDT
+- One Function API - `send_privately()` does everything
 
 ## Installation
 
@@ -25,183 +22,99 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-privacy-cash-sdk = "0.1"
+privacy-cash = { git = "https://github.com/Nova-Shield/privacy-cash-rust-sdk" }
+tokio = { version = "1", features = ["full"] }
 ```
 
-### Prerequisites
+### Circuit Files (Required)
 
-**Node.js is required** for ZK proof generation:
+Download the circuit files (~60MB total):
 
 ```bash
-# Install Node.js (if not installed)
-# macOS: brew install node
-# Ubuntu: apt install nodejs npm
-
-# Install TypeScript bridge dependencies
-cd path/to/privacy-cash-rust-sdk/ts-bridge
-npm install
+mkdir -p circuit
+curl -L -o circuit/transaction2.wasm "https://privacy.cash/circuits/transaction2.wasm"
+curl -L -o circuit/transaction2.zkey "https://privacy.cash/circuits/transaction2.zkey"
 ```
 
-## Quick Start - Send Privately
-
-The main function for privacy transfers:
+## Quick Start - ONE Function!
 
 ```rust
-use privacy_cash::bridge::send_privately;
+use privacy_cash::send_privately;
 
-fn main() {
-    // Send 0.01 SOL privately
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Send 0.1 SOL privately - ONE function does everything!
     let result = send_privately(
-        "https://api.mainnet-beta.solana.com",
-        "your_private_key_base58",
-        10_000_000, // 0.01 SOL in lamports
-        "recipient_pubkey_base58",
-    ).unwrap();
-
+        "your_base58_private_key",  // Private key
+        "recipient_pubkey",          // Recipient address
+        0.1,                         // Amount to send
+        "sol",                       // Token: "sol", "usdc", "usdt"
+        None,                        // Optional RPC URL
+    ).await?;
+    
+    println!("Sent privately!");
     println!("Deposit TX: {}", result.deposit_signature);
     println!("Withdraw TX: {}", result.withdraw_signature);
+    println!("Recipient received: {} lamports", result.amount_received);
+    
+    Ok(())
 }
 ```
 
-This single function:
-1. ✅ Deposits into Privacy Cash
-2. ✅ Withdraws to recipient privately
+The `send_privately()` function automatically:
+1. Deposits your tokens into Privacy Cash
+2. Waits for blockchain confirmation
+3. Withdraws the maximum amount to the recipient
 
-## API Reference
+## API
 
-### Send Privately (Main Function)
-
-```rust
-use privacy_cash::bridge::{send_privately, send_privately_spl};
-
-// Send SOL privately
-let result = send_privately(rpc_url, private_key, lamports, recipient)?;
-
-// Send SPL tokens privately (e.g., USDC)
-let usdc_mint = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
-let result = send_privately_spl(rpc_url, private_key, base_units, usdc_mint, recipient)?;
-```
-
-### Check Balances
+### SendPrivatelyResult
 
 ```rust
-use privacy_cash::bridge::{ts_get_balance, ts_get_balance_spl};
-
-// Get private SOL balance
-let balance = ts_get_balance(rpc_url, private_key)?;
-println!("Private SOL: {} lamports", balance.lamports);
-
-// Get private USDC balance
-let usdc_mint = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
-let balance = ts_get_balance_spl(rpc_url, private_key, usdc_mint)?;
-println!("Private USDC: {} base units", balance.base_units);
+pub struct SendPrivatelyResult {
+    pub deposit_signature: String,   // Deposit transaction
+    pub withdraw_signature: String,  // Withdraw transaction
+    pub amount_deposited: u64,       // Amount deposited
+    pub amount_received: u64,        // Amount recipient received
+    pub total_fees: u64,             // Total fees paid
+    pub recipient: String,           // Recipient address
+    pub token: String,               // Token type
+}
 ```
 
-### Deposit & Withdraw (Individual Operations)
+## Supported Tokens
 
-```rust
-use privacy_cash::bridge::{
-    ts_deposit, ts_withdraw, ts_withdraw_all,
-    ts_deposit_spl, ts_withdraw_spl, ts_withdraw_all_spl,
-};
-
-// Deposit SOL
-let result = ts_deposit(rpc_url, private_key, lamports)?;
-
-// Withdraw SOL
-let result = ts_withdraw(rpc_url, private_key, lamports, Some(recipient))?;
-
-// Withdraw ALL private SOL
-let result = ts_withdraw_all(rpc_url, private_key, None)?;
-
-// SPL tokens
-let result = ts_deposit_spl(rpc_url, private_key, base_units, mint)?;
-let result = ts_withdraw_spl(rpc_url, private_key, base_units, mint, recipient)?;
-let result = ts_withdraw_all_spl(rpc_url, private_key, mint, recipient)?;
-```
+| Token | Minimum | Fee |
+|-------|---------|-----|
+| SOL   | 0.02 SOL | ~0.006 SOL |
+| USDC  | 2 USDC   | ~0.85 USDC |
+| USDT  | 2 USDT   | ~0.85 USDT |
 
 ## Examples
 
-### Check Balances
-
 ```bash
-SOLANA_PRIVATE_KEY="your-key" cargo run --example send_privately
+# Check balances
+SOLANA_PRIVATE_KEY="your-key" cargo run --release --example check_balance
+
+# Send 0.02 SOL privately
+SOLANA_PRIVATE_KEY="your-key" cargo run --release --example send_privately -- 0.02 sol
+
+# Send 10 USDC privately to a recipient
+SOLANA_PRIVATE_KEY="your-key" cargo run --release --example send_privately -- 10 usdc RecipientPubkey
 ```
-
-### Send Privately
-
-```bash
-SOLANA_PRIVATE_KEY="your-key" cargo run --example send_privately -- 0.01 RecipientPubkey
-```
-
-### Withdraw All
-
-```bash
-SOLANA_PRIVATE_KEY="your-key" cargo run --example withdraw_all_bridge
-```
-
-## Supported Tokens (Dynamic)
-
-Tokens are fetched dynamically from the Privacy Cash API:
-
-| Token | Minimum Withdrawal | Rent Fee |
-|-------|-------------------|----------|
-| SOL   | 0.01 SOL          | ~0.006 SOL |
-| USDC  | 2 USDC            | ~0.85 USDC |
-| USDT  | 2 USDT            | ~0.85 USDT |
-| ZEC   | 0.01 ZEC          | ~0.002 ZEC |
-| ORE   | 0.02 ORE          | ~0.007 ORE |
-| STORE | 0.02 STORE        | ~0.007 STORE |
-
-New tokens are automatically supported when Privacy Cash adds them.
 
 ## Security
 
-⚠️ **IMPORTANT**: 
-
-- **Never hardcode private keys** in your code
+- Never hardcode private keys in your code
 - Use environment variables or secure key management
 - Private keys are used locally and never sent to any server
 - All ZK proofs are generated client-side
 
-## How It Works
-
-1. **Deposit**: Tokens are deposited into Privacy Cash, creating an encrypted UTXO
-2. **ZK Proof**: A zero-knowledge proof is generated client-side
-3. **Withdraw**: Proof is verified on-chain, tokens sent to recipient
-4. **Privacy**: Link between deposit and withdrawal is cryptographically hidden
-
-## Architecture
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                     Your Rust Application                   │
-├─────────────────────────────────────────────────────────────┤
-│                  privacy-cash (Rust crate)                  │
-│  ┌──────────────────────────────────────────────────────┐  │
-│  │                    bridge module                      │  │
-│  │  send_privately() → ts_deposit() → ts_withdraw()     │  │
-│  └──────────────────────────────────────────────────────┘  │
-├─────────────────────────────────────────────────────────────┤
-│              ts-bridge/ (TypeScript CLI)                    │
-│  ┌──────────────────────────────────────────────────────┐  │
-│  │  privacy-cash-sdk (npm) + ZK proof generation        │  │
-│  └──────────────────────────────────────────────────────┘  │
-├─────────────────────────────────────────────────────────────┤
-│                   Privacy Cash Protocol                     │
-│                    (Solana on-chain)                        │
-└─────────────────────────────────────────────────────────────┘
-```
-
 ## License
 
-MIT License - Copyright © 2026 Nova Shield
-
-See [LICENSE](LICENSE) for details.
+MIT License - Copyright 2024 Nova Shield
 
 ## Links
 
-- [Nova Shield](https://nshield.org) - Created by Nova Shield
-- [Nova for Solana - iOS App](https://apps.apple.com/us/app/nova-for-solana/id6753857720) - Download on the App Store
-- [Privacy Cash Protocol](https://privacycash.org) - The underlying privacy protocol
-- [Privacy Cash TypeScript SDK](https://github.com/Privacy-Cash/privacy-cash-sdk)
+- [Nova Shield](https://nshield.org)
+- [Privacy Cash Protocol](https://privacycash.org)

@@ -10,7 +10,8 @@ use crate::error::{PrivacyCashError, Result};
 use crate::get_utxos_spl::get_utxos_spl;
 use crate::keypair::ZkKeypair;
 use crate::merkle_tree::MerkleTree;
-use crate::prover::{parse_proof_to_bytes, parse_public_signals_to_bytes, CircuitInput, Prover};
+use crate::prover::{parse_proof_to_bytes, parse_public_signals_to_bytes, CircuitInput};
+use crate::prover_rust::RustProver;
 use crate::storage::Storage;
 use crate::utxo::{Utxo, UtxoVersion};
 use crate::utils::{
@@ -242,8 +243,9 @@ pub async fn withdraw_spl(params: WithdrawSplParams<'_>) -> Result<WithdrawSplRe
         mint_address: get_mint_address_field(mint_address),
     };
 
-    log::info!("Generating ZK proof...");
-    let prover = Prover::new(key_base_path);
+    // Generate proof using pure Rust prover (iOS compatible, no Node.js needed)
+    log::info!("Generating ZK proof using pure Rust prover...");
+    let prover = RustProver::new(key_base_path);
     let (proof, public_signals) = prover.prove(&circuit_input).await?;
 
     let proof_bytes = parse_proof_to_bytes(&proof)?;

@@ -10,7 +10,8 @@ use crate::error::{PrivacyCashError, Result};
 use crate::get_utxos::get_utxos;
 use crate::keypair::ZkKeypair;
 use crate::merkle_tree::MerkleTree;
-use crate::prover::{parse_proof_to_bytes, parse_public_signals_to_bytes, CircuitInput, Prover};
+use crate::prover::{parse_proof_to_bytes, parse_public_signals_to_bytes, CircuitInput};
+use crate::prover_rust::RustProver;
 use crate::storage::Storage;
 use crate::utxo::{Utxo, UtxoVersion};
 use crate::utils::{
@@ -79,7 +80,10 @@ pub async fn withdraw(params: WithdrawParams<'_>) -> Result<WithdrawResult> {
         (amount_in_lamports as f64 * withdraw_fee_rate + LAMPORTS_PER_SOL as f64 * withdraw_rent_fee)
             as u64;
 
-    amount_in_lamports = amount_in_lamports.saturating_sub(fee_in_lamports);
+    // Note: We do NOT subtract fee from amount here.
+    // The user requests X lamports to withdraw, and the fee is taken from their balance.
+    // ext_amount = -amount_in_lamports (the amount leaving the pool)
+    // change = total_input - amount_in_lamports - fee
     let mut is_partial = false;
 
     log::info!(
@@ -129,12 +133,22 @@ pub async fn withdraw(params: WithdrawParams<'_>) -> Result<WithdrawResult> {
     let required = BigUint::from(amount_in_lamports + fee_in_lamports);
     if total_input_amount < required {
         is_partial = true;
-        amount_in_lamports = total_input_amount
+        // In partial withdrawal, we withdraw everything minus the fee
+        let total_as_u64 = total_input_amount
             .to_u64_digits()
             .first()
             .copied()
-            .unwrap_or(0)
-            .saturating_sub(fee_in_lamports);
+            .unwrap_or(0);
+        
+        // If balance is less than fee, we can't withdraw anything
+        if total_as_u64 <= fee_in_lamports {
+            return Err(PrivacyCashError::InsufficientBalance {
+                have: total_as_u64,
+                need: fee_in_lamports,
+            });
+        }
+        
+        amount_in_lamports = total_as_u64.saturating_sub(fee_in_lamports);
     }
 
     // Calculate change
@@ -234,9 +248,9 @@ pub async fn withdraw(params: WithdrawParams<'_>) -> Result<WithdrawResult> {
         mint_address: get_mint_address_field(&sol_mint),
     };
 
-    // Generate proof
-    log::info!("Generating ZK proof...");
-    let prover = Prover::new(key_base_path);
+    // Generate proof using pure Rust prover (iOS compatible, no Node.js needed)
+    log::info!("Generating ZK proof using pure Rust prover...");
+    let prover = RustProver::new(key_base_path);
     let (proof, public_signals) = prover.prove(&circuit_input).await?;
 
     // Parse proof to bytes
@@ -253,8 +267,11 @@ pub async fn withdraw(params: WithdrawParams<'_>) -> Result<WithdrawResult> {
     let serialized_proof = serialize_withdraw_proof(&proof_bytes, &signals_bytes, &ext_data);
 
     // Build withdraw parameters for backend
+    use base64::Engine;
+    let b64 = base64::engine::general_purpose::STANDARD;
+    
     let withdraw_params = serde_json::json!({
-        "serializedProof": base64::encode(&serialized_proof),
+        "serializedProof": b64.encode(&serialized_proof),
         "treeAccount": tree_account.to_string(),
         "nullifier0PDA": nullifier0_pda.to_string(),
         "nullifier1PDA": nullifier1_pda.to_string(),
@@ -265,13 +282,15 @@ pub async fn withdraw(params: WithdrawParams<'_>) -> Result<WithdrawResult> {
         "recipient": recipient.to_string(),
         "feeRecipientAccount": FEE_RECIPIENT.to_string(),
         "extAmount": ext_amount,
-        "encryptedOutput1": base64::encode(&encrypted_output1),
-        "encryptedOutput2": base64::encode(&encrypted_output2),
+        "encryptedOutput1": b64.encode(&encrypted_output1),
+        "encryptedOutput2": b64.encode(&encrypted_output2),
         "fee": fee_in_lamports,
         "lookupTableAddress": ALT_ADDRESS.to_string(),
         "senderAddress": public_key.to_string(),
         "referralWalletAddress": referrer
     });
+    
+    log::debug!("Withdraw params: {:?}", withdraw_params);
 
     // Submit to backend
     log::info!("Submitting withdrawal to relayer...");

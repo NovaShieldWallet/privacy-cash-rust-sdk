@@ -457,6 +457,25 @@ impl PrivacyCash {
         self.withdraw_spl(base_units, &USDC_MINT, recipient).await
     }
 
+    /// Withdraw USDT (convenience method)
+    pub async fn withdraw_usdt(
+        &self,
+        base_units: u64,
+        recipient: Option<&Pubkey>,
+    ) -> Result<WithdrawSplResult> {
+        self.withdraw_spl(base_units, &crate::constants::USDT_MINT, recipient).await
+    }
+
+    /// Deposit USDT (convenience method)
+    pub async fn deposit_usdt(&self, base_units: u64) -> Result<DepositSplResult> {
+        self.deposit_spl(base_units, &crate::constants::USDT_MINT).await
+    }
+
+    /// Get private USDT balance (convenience method)
+    pub async fn get_private_balance_usdt(&self) -> Result<SplBalance> {
+        self.get_private_balance_spl(&crate::constants::USDT_MINT).await
+    }
+
     /// Withdraw ALL of a specific SPL token
     ///
     /// # Arguments

@@ -9,7 +9,8 @@ use crate::error::{PrivacyCashError, Result};
 use crate::get_utxos_spl::get_utxos_spl;
 use crate::keypair::ZkKeypair;
 use crate::merkle_tree::MerkleTree;
-use crate::prover::{parse_proof_to_bytes, parse_public_signals_to_bytes, CircuitInput, Prover};
+use crate::prover::{parse_proof_to_bytes, parse_public_signals_to_bytes, CircuitInput};
+use crate::prover_rust::RustProver;
 use crate::storage::Storage;
 use crate::utxo::{Utxo, UtxoVersion};
 use crate::utils::{
@@ -20,9 +21,19 @@ use crate::utils::{
 use num_bigint::BigUint;
 use serde::{Deserialize, Serialize};
 use solana_client::rpc_client::RpcClient;
-use solana_sdk::{pubkey::Pubkey, signature::Keypair};
-use solana_sdk::signer::Signer;
+use solana_sdk::{
+    address_lookup_table::AddressLookupTableAccount,
+    compute_budget::ComputeBudgetInstruction,
+    instruction::{AccountMeta, Instruction},
+    message::{v0::Message as MessageV0, VersionedMessage},
+    pubkey::Pubkey,
+    signature::Keypair,
+    signer::Signer,
+    system_program,
+    transaction::VersionedTransaction,
+};
 use spl_associated_token_account::get_associated_token_address;
+use spl_token;
 
 /// SPL Deposit result
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -70,7 +81,8 @@ pub async fn deposit_spl(params: DepositSplParams<'_>) -> Result<DepositSplResul
     // Get token accounts
     let signer_token_account = get_associated_token_address(&public_key, mint_address);
     let fee_recipient_token_account = get_associated_token_address(&FEE_RECIPIENT, mint_address);
-    let recipient = Pubkey::from([0u8; 32]); // Placeholder for deposit
+    // For deposits, recipient is a placeholder (FEE_RECIPIENT) - same as TypeScript SDK
+    let recipient = *FEE_RECIPIENT;
     let recipient_ata = get_associated_token_address(&recipient, mint_address);
 
     // Get SPL tree account
@@ -190,17 +202,29 @@ pub async fn deposit_spl(params: DepositSplParams<'_>) -> Result<DepositSplResul
     let encrypted_output1 = encryption_service.encrypt_utxo(&outputs[0])?;
     let encrypted_output2 = encryption_service.encrypt_utxo(&outputs[1])?;
 
+    // For SPL deposits, ExtData uses token accounts (ATAs), not public keys - same as TypeScript SDK
+    // recipient_ata = FEE_RECIPIENT's ATA for the token
+    // feeRecipientTokenAccount = FEE_RECIPIENT's ATA for the token
     let ext_data = ExtData {
-        recipient: recipient_ata,
+        recipient: recipient_ata,  // FEE_RECIPIENT's ATA (token account)
         ext_amount,
         encrypted_output1: encrypted_output1.clone(),
         encrypted_output2: encrypted_output2.clone(),
         fee: fee_base_units,
-        fee_recipient: fee_recipient_token_account,
+        fee_recipient: fee_recipient_token_account,  // FEE_RECIPIENT's ATA (token account)
         mint_address: *mint_address,
     };
 
+    log::debug!("SPL ExtData recipient (ATA): {}", ext_data.recipient);
+    log::debug!("SPL ExtData ext_amount: {}", ext_data.ext_amount);
+    log::debug!("SPL ExtData fee: {}", ext_data.fee);
+    log::debug!("SPL ExtData fee_recipient (ATA): {}", ext_data.fee_recipient);
+    log::debug!("SPL ExtData mint_address: {}", ext_data.mint_address);
+    log::debug!("SPL ExtData encrypted_output1 len: {}", ext_data.encrypted_output1.len());
+    log::debug!("SPL ExtData encrypted_output2 len: {}", ext_data.encrypted_output2.len());
+
     let ext_data_hash = ext_data.hash();
+    log::debug!("SPL ExtData hash (BE): {:02x?}", ext_data_hash);
 
     // Build circuit input
     let circuit_input = CircuitInput {
@@ -226,21 +250,94 @@ pub async fn deposit_spl(params: DepositSplParams<'_>) -> Result<DepositSplResul
         mint_address: get_mint_address_field(mint_address),
     };
 
-    // Generate proof
-    log::info!("Generating ZK proof...");
-    let prover = Prover::new(key_base_path);
+    // Generate proof using pure Rust prover (iOS compatible, no Node.js needed)
+    log::info!("Generating ZK proof using pure Rust prover...");
+    let prover = RustProver::new(key_base_path);
     let (proof, public_signals) = prover.prove(&circuit_input).await?;
 
     let proof_bytes = parse_proof_to_bytes(&proof)?;
     let signals_bytes = parse_public_signals_to_bytes(&public_signals)?;
 
+    // Find nullifier PDAs
+    let (nullifier0_pda, nullifier1_pda) =
+        find_nullifier_pdas(&[signals_bytes[3], signals_bytes[4]]);
+    let (nullifier2_pda, nullifier3_pda) =
+        find_cross_check_nullifier_pdas(&[signals_bytes[3], signals_bytes[4]]);
+
     // Serialize instruction data
     let instruction_data = serialize_spl_instruction(&proof_bytes, &signals_bytes, &ext_data);
 
-    // Relay to backend (SPL deposits are also signed transactions)
+    // Get SPL-specific accounts
+    let signer_token_account = get_associated_token_address(&public_key, mint_address);
+    let recipient = *FEE_RECIPIENT; // Placeholder recipient
+    let recipient_ata = get_associated_token_address(&recipient, mint_address);
+    let fee_recipient_token_account = get_associated_token_address(&FEE_RECIPIENT, mint_address);
+    
+    // Get tree ATA (global config PDA's token account)
+    let (global_config_pda, _) = Pubkey::find_program_address(
+        &[b"global_config"],
+        &PROGRAM_ID,
+    );
+    let tree_ata = get_associated_token_address(&global_config_pda, mint_address);
+
+    // Build deposit instruction
+    let deposit_instruction = Instruction {
+        program_id: *PROGRAM_ID,
+        accounts: vec![
+            AccountMeta::new(tree_account, false),
+            AccountMeta::new(nullifier0_pda, false),
+            AccountMeta::new(nullifier1_pda, false),
+            AccountMeta::new_readonly(nullifier2_pda, false),
+            AccountMeta::new_readonly(nullifier3_pda, false),
+            AccountMeta::new_readonly(global_config_account, false),
+            AccountMeta::new(public_key, true), // signer
+            AccountMeta::new_readonly(*mint_address, false), // SPL token mint
+            AccountMeta::new(signer_token_account, false), // signer's token account
+            AccountMeta::new(recipient, false), // recipient (placeholder)
+            AccountMeta::new(recipient_ata, false), // recipient's token account
+            AccountMeta::new(tree_ata, false), // tree ATA
+            AccountMeta::new(fee_recipient_token_account, false), // fee recipient token account
+            AccountMeta::new_readonly(spl_token::id(), false), // token program
+            AccountMeta::new_readonly(spl_associated_token_account::id(), false), // ATA program
+            AccountMeta::new_readonly(system_program::id(), false), // system program
+        ],
+        data: instruction_data,
+    };
+
+    let compute_budget_ix = ComputeBudgetInstruction::set_compute_unit_limit(1_000_000);
+
+    // Fetch Address Lookup Table
+    log::info!("Fetching Address Lookup Table...");
+    let alt_account = connection.get_account(&ALT_ADDRESS)?;
+    let alt = AddressLookupTableAccount {
+        key: *ALT_ADDRESS,
+        addresses: parse_alt_addresses(&alt_account.data)?,
+    };
+
+    // Build VersionedTransaction with V0 message
+    let recent_blockhash = connection.get_latest_blockhash()?;
+    
+    let message = MessageV0::try_compile(
+        &public_key,
+        &[compute_budget_ix, deposit_instruction],
+        &[alt],
+        recent_blockhash,
+    ).map_err(|e| PrivacyCashError::TransactionError(format!("Failed to compile message: {}", e)))?;
+
+    let versioned_message = VersionedMessage::V0(message);
+    let transaction = VersionedTransaction::try_new(versioned_message, &[keypair])
+        .map_err(|e| PrivacyCashError::TransactionError(format!("Failed to create transaction: {}", e)))?;
+
+    // Serialize transaction for relay
+    use base64::Engine;
+    let tx_bytes = bincode::serialize(&transaction)
+        .map_err(|e| PrivacyCashError::SerializationError(format!("Failed to serialize transaction: {}", e)))?;
+    let serialized = base64::engine::general_purpose::STANDARD.encode(&tx_bytes);
+
+    // Relay to backend
     log::info!("Submitting transaction to relayer...");
     let signature = relay_spl_deposit_to_indexer(
-        &base64::encode(&instruction_data),
+        &serialized,
         &public_key,
         mint_address,
         referrer,
@@ -360,4 +457,33 @@ async fn wait_for_spl_confirmation(encrypted_output: &[u8], token_name: &str) ->
 
         log::info!("Confirming SPL transaction... (retry {})", retries);
     }
+}
+
+/// Parse Address Lookup Table addresses from account data
+fn parse_alt_addresses(data: &[u8]) -> Result<Vec<Pubkey>> {
+    // ALT format: 56 bytes header + addresses (32 bytes each)
+    const HEADER_SIZE: usize = 56;
+    
+    if data.len() < HEADER_SIZE {
+        return Err(PrivacyCashError::TransactionError(
+            "Invalid ALT account data".to_string()
+        ));
+    }
+    
+    let addresses_data = &data[HEADER_SIZE..];
+    let num_addresses = addresses_data.len() / 32;
+    
+    let mut addresses = Vec::with_capacity(num_addresses);
+    for i in 0..num_addresses {
+        let start = i * 32;
+        let end = start + 32;
+        if end <= addresses_data.len() {
+            let pubkey_bytes: [u8; 32] = addresses_data[start..end]
+                .try_into()
+                .map_err(|_| PrivacyCashError::TransactionError("Invalid pubkey in ALT".to_string()))?;
+            addresses.push(Pubkey::new_from_array(pubkey_bytes));
+        }
+    }
+    
+    Ok(addresses)
 }

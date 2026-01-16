@@ -1,100 +1,110 @@
-//! Send Privately Example
+//! Send Privately - THE main example for Privacy Cash Rust SDK
 //!
-//! This is the main function for privacy transfers using Nova Shield.
-//! 
+//! ONE function does everything: deposit + withdraw to recipient
+//!
 //! Usage:
-//!   cargo run --example send_privately -- <amount_sol> <recipient>
+//!   SOLANA_PRIVATE_KEY=<key> cargo run --release --example send_privately -- <amount> <token> <recipient>
 //!
-//! Example:
-//!   SOLANA_PRIVATE_KEY=your_key cargo run --example send_privately -- 0.01 RecipientPubkey
+//! Examples:
+//!   # Send 0.02 SOL to yourself
+//!   SOLANA_PRIVATE_KEY=<key> cargo run --release --example send_privately -- 0.02 sol
+//!
+//!   # Send 10 USDC to a recipient
+//!   SOLANA_PRIVATE_KEY=<key> cargo run --release --example send_privately -- 10 usdc RecipientPubkey
 
-use privacy_cash::bridge::{
-    send_privately, send_privately_spl, 
-    ts_get_balance, ts_get_balance_spl,
-    get_nova_shield_fee_rate, get_nova_shield_fee_wallet
-};
+use privacy_cash::{send_privately, Signer};
+use solana_sdk::signature::Keypair;
 use std::env;
 
-fn main() {
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
     println!("═══════════════════════════════════════════════════════════════");
-    println!("       NOVA SHIELD - SEND PRIVATELY");
-    println!("═══════════════════════════════════════════════════════════════");
-    println!("       Nova Shield Fee: {}%", get_nova_shield_fee_rate() * 100.0);
-    println!("       Fee Wallet: {}", get_nova_shield_fee_wallet());
+    println!("       PRIVACY CASH - Send Privately");
+    println!("       Pure Rust SDK (iOS Compatible)");
     println!("═══════════════════════════════════════════════════════════════\n");
 
     // Get private key from environment
-    let private_key = match env::var("SOLANA_PRIVATE_KEY") {
-        Ok(key) => key,
-        Err(_) => {
-            eprintln!("❌ Error: SOLANA_PRIVATE_KEY environment variable not set");
-            eprintln!("\nUsage:");
-            eprintln!("  SOLANA_PRIVATE_KEY=your_key cargo run --example send_privately -- <amount_sol> <recipient>");
-            std::process::exit(1);
-        }
-    };
+    let private_key = env::var("SOLANA_PRIVATE_KEY")
+        .expect("Please set SOLANA_PRIVATE_KEY environment variable");
 
-    let rpc_url = env::var("SOLANA_RPC_URL")
-        .unwrap_or_else(|_| "https://api.mainnet-beta.solana.com".to_string());
+    // Parse keypair to get pubkey for display
+    let key_bytes = bs58::decode(&private_key).into_vec()?;
+    let keypair = Keypair::from_bytes(&key_bytes)?;
+    let self_pubkey = keypair.pubkey();
 
+    // Parse command line arguments
     let args: Vec<String> = env::args().collect();
     
     if args.len() < 3 {
-        // Just show balances
-        println!("📊 Current Private Balances:\n");
-        
-        match ts_get_balance(&rpc_url, &private_key) {
-            Ok(balance) => println!("   SOL: {} lamports ({} SOL)", balance.lamports, balance.sol),
-            Err(e) => println!("   SOL: Error - {}", e),
-        }
-        
-        let usdc_mint = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
-        match ts_get_balance_spl(&rpc_url, &private_key, usdc_mint) {
-            Ok(balance) => println!("   USDC: {} base units ({} USDC)", balance.base_units, balance.amount),
-            Err(e) => println!("   USDC: Error - {}", e),
-        }
-        
-        let usdt_mint = "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB";
-        match ts_get_balance_spl(&rpc_url, &private_key, usdt_mint) {
-            Ok(balance) => println!("   USDT: {} base units ({} USDT)", balance.base_units, balance.amount),
-            Err(e) => println!("   USDT: Error - {}", e),
-        }
-        
-        println!("\n\nTo send privately:");
-        println!("  SOLANA_PRIVATE_KEY=key cargo run --example send_privately -- <amount_sol> <recipient>");
-        println!("  SOLANA_PRIVATE_KEY=key cargo run --example send_privately -- 0.01 RecipientPubkey");
-        return;
+        println!("Usage: {} <amount> <token> [recipient]", args[0]);
+        println!("\nExamples:");
+        println!("  Send 0.02 SOL to yourself:");
+        println!("    SOLANA_PRIVATE_KEY=<key> cargo run --release --example send_privately -- 0.02 sol");
+        println!("\n  Send 10 USDC to a recipient:");
+        println!("    SOLANA_PRIVATE_KEY=<key> cargo run --release --example send_privately -- 10 usdc RecipientPubkey");
+        println!("\nSupported tokens: sol, usdc, usdt");
+        return Ok(());
     }
 
-    let amount_sol: f64 = args[1].parse().expect("Invalid amount");
-    let recipient = &args[2];
-    let lamports = (amount_sol * 1_000_000_000.0) as u64;
+    let amount: f64 = args[1].parse().expect("Invalid amount");
+    let token = &args[2];
+    let recipient = if args.len() > 3 {
+        args[3].clone()
+    } else {
+        self_pubkey.to_string() // Default to self
+    };
 
-    println!("📤 Sending {} SOL ({} lamports) privately to {}\n", amount_sol, lamports, recipient);
-    println!("   This will:");
-    println!("   1. Deposit {} SOL into Privacy Cash", amount_sol);
-    println!("   2. Collect {}% Nova Shield fee ({} lamports)", 
-        get_nova_shield_fee_rate() * 100.0,
-        (lamports as f64 * get_nova_shield_fee_rate()) as u64
+    // Get RPC URL from environment or use default
+    let rpc_url = env::var("SOLANA_RPC_URL").ok();
+
+    println!("Wallet: {}", self_pubkey);
+    println!("Recipient: {}", recipient);
+    println!("Amount: {} {}", amount, token.to_uppercase());
+    if let Some(ref rpc) = rpc_url {
+        println!("RPC: {}", rpc);
+    }
+    println!();
+
+    println!("🚀 Sending {} {} privately...\n", amount, token.to_uppercase());
+
+    // ONE FUNCTION DOES EVERYTHING!
+    let result = send_privately(
+        &private_key,
+        &recipient,
+        amount,
+        token,
+        rpc_url.as_deref(),
+    ).await?;
+
+    println!("\n═══════════════════════════════════════════════════════════════");
+    println!("                    ✅ SUCCESS!");
+    println!("═══════════════════════════════════════════════════════════════");
+    println!("\n📥 Deposit TX:  {}", result.deposit_signature);
+    println!("📤 Withdraw TX: {}", result.withdraw_signature);
+    println!("\n💰 Amount deposited: {} {}", 
+        format_amount(result.amount_deposited, &result.token),
+        result.token.to_uppercase()
     );
-    println!("   3. Withdraw to recipient\n");
+    println!("💸 Amount received:  {} {}", 
+        format_amount(result.amount_received, &result.token),
+        result.token.to_uppercase()
+    );
+    println!("🏷️  Total fees:       {} {}", 
+        format_amount(result.total_fees, &result.token),
+        result.token.to_uppercase()
+    );
+    println!("👤 Recipient:        {}", result.recipient);
+    println!("\n═══════════════════════════════════════════════════════════════\n");
 
-    match send_privately(&rpc_url, &private_key, lamports, recipient) {
-        Ok(result) => {
-            println!("✅ Private transfer successful!\n");
-            println!("   Deposit TX:      {}", result.deposit_signature);
-            println!("   Withdraw TX:     {}", result.withdraw_signature);
-            println!("   Nova Shield TX:  {}\n", result.nova_shield_fee_tx);
-            println!("   Amount Sent:     {} lamports", result.amount_sent);
-            println!("   Amount Received: {} lamports", result.amount_received);
-            println!("   Privacy Cash Fee: {} lamports", result.privacy_cash_fee);
-            println!("   Nova Shield Fee: {} lamports (1%)", result.nova_shield_fee);
-            println!("   Recipient:       {}", result.recipient);
-        }
-        Err(e) => {
-            println!("❌ Private transfer failed: {}", e);
-        }
+    Ok(())
+}
+
+fn format_amount(amount: u64, token: &str) -> String {
+    match token {
+        "sol" => format!("{:.6}", amount as f64 / 1_000_000_000.0),
+        "usdc" | "usdt" => format!("{:.2}", amount as f64 / 1_000_000.0),
+        _ => amount.to_string(),
     }
 }

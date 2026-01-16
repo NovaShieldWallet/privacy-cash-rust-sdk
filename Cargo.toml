@@ -1,24 +1,21 @@
 [package]
-name = "privacy-cash-sdk"
+name = "privacy-cash"
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.70"
 authors = ["Nova Shield <team@nshield.org>"]
-description = "Rust SDK for Privacy Cash - Privacy-preserving transactions on Solana using Zero-Knowledge Proofs. Created by Nova Shield."
+description = "Pure Rust SDK for Privacy Cash - Privacy-preserving transactions on Solana using Zero-Knowledge Proofs. iOS compatible, no Node.js required."
 license = "MIT"
-repository = "https://github.com/NovaShieldWallet/privacy-cash-rust-sdk"
-documentation = "https://docs.rs/privacy-cash-sdk"
+repository = "https://github.com/Nova-Shield/privacy-cash-rust-sdk"
+documentation = "https://docs.rs/privacy-cash"
 homepage = "https://nshield.org"
 readme = "README.md"
-keywords = ["solana", "privacy", "zk-proofs", "cryptocurrency", "defi"]
+keywords = ["solana", "privacy", "zk-proofs", "cryptocurrency", "ios"]
 categories = ["cryptography", "api-bindings", "finance"]
 include = [
     "src/**/*",
     "examples/**/*",
-    "ts-bridge/cli.ts",
-    "ts-bridge/package.json",
-    "ts-bridge/package-lock.json",
-    "ts-bridge/.gitignore",
+    "vendor/ark-circom-0.1.0/**/*",
     "Cargo.toml",
     "LICENSE",
     "README.md",
@@ -37,20 +34,8 @@ name = "check_balance"
 path = "examples/check_balance.rs"
 
 [[example]]
-name = "test_deposit"
-path = "examples/test_deposit.rs"
-
-[[example]]
 name = "send_privately"
 path = "examples/send_privately.rs"
-
-[[example]]
-name = "test_bridge"
-path = "examples/test_bridge.rs"
-
-[[example]]
-name = "withdraw_all_bridge"
-path = "examples/withdraw_all_bridge.rs"
 
 [dependencies]
 # Solana dependencies - using 2.x
@@ -93,17 +78,24 @@ once_cell = "1.19"
 parking_lot = "0.12"
 
 # Cryptography - ark-ff 0.4.x for Solana SDK compatibility
-ark-bn254 = "0.4.0"
+ark-bn254 = "0.4"
 ark-ff = "0.4"
+ark-groth16 = "0.4"
+ark-relations = "0.4"
+ark-serialize = "0.4"
+ark-std = "0.4"
+ark-ec = "0.4"
+ark-crypto-primitives = "0.4"
+
+# Patched ark-circom - uses ark-ff 0.4.x for Solana SDK compatibility
+# Local path for development, git for publishing
+ark-circom = { path = "vendor/ark-circom-0.1.0", features = ["circom-2"] }
 
 [dev-dependencies]
 tokio-test = "0.4"
-dotenv = "0.15"
 
 [features]
 default = []
-# Enable verbose debug logging
-debug = []
 
 [package.metadata.docs.rs]
 all-features = true

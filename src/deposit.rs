@@ -1,14 +1,15 @@
 //! Deposit functionality for native SOL
 
 use crate::constants::{
-    FEE_RECIPIENT, PROGRAM_ID, TRANSACT_IX_DISCRIMINATOR,
+    ALT_ADDRESS, FEE_RECIPIENT, PROGRAM_ID, TRANSACT_IX_DISCRIMINATOR,
 };
 use crate::encryption::EncryptionService;
 use crate::error::{PrivacyCashError, Result};
 use crate::get_utxos::get_utxos;
 use crate::keypair::ZkKeypair;
 use crate::merkle_tree::MerkleTree;
-use crate::prover::{parse_proof_to_bytes, parse_public_signals_to_bytes, CircuitInput, Prover};
+use crate::prover::{parse_proof_to_bytes, parse_public_signals_to_bytes, CircuitInput};
+use crate::prover_rust::RustProver;
 use crate::storage::Storage;
 use crate::utxo::{Utxo, UtxoVersion};
 use crate::utils::{
@@ -21,12 +22,15 @@ use num_traits::Zero;
 use serde::{Deserialize, Serialize};
 use solana_client::rpc_client::RpcClient;
 use solana_sdk::{
+    address_lookup_table::AddressLookupTableAccount,
     compute_budget::ComputeBudgetInstruction,
     instruction::{AccountMeta, Instruction},
+    message::{v0::Message as MessageV0, VersionedMessage},
     pubkey::Pubkey,
     signature::Keypair,
     signer::Signer,
     system_program,
+    transaction::VersionedTransaction,
 };
 use std::str::FromStr;
 
@@ -193,6 +197,16 @@ pub async fn deposit(params: DepositParams<'_>) -> Result<DepositResult> {
     };
 
     let ext_data_hash = ext_data.hash();
+    
+    // Debug: log extData values
+    log::debug!("ExtData recipient: {}", ext_data.recipient);
+    log::debug!("ExtData ext_amount: {}", ext_data.ext_amount);
+    log::debug!("ExtData fee: {}", ext_data.fee);
+    log::debug!("ExtData fee_recipient: {}", ext_data.fee_recipient);
+    log::debug!("ExtData mint_address: {}", ext_data.mint_address);
+    log::debug!("ExtData encrypted_output1 len: {}", ext_data.encrypted_output1.len());
+    log::debug!("ExtData encrypted_output2 len: {}", ext_data.encrypted_output2.len());
+    log::debug!("ExtData hash (BE): {:02x?}", ext_data_hash);
 
     // Build circuit input
     let circuit_input = CircuitInput {
@@ -218,14 +232,25 @@ pub async fn deposit(params: DepositParams<'_>) -> Result<DepositResult> {
         mint_address: get_mint_address_field(&sol_mint),
     };
 
-    // Generate proof
-    log::info!("Generating ZK proof...");
-    let prover = Prover::new(key_base_path);
+    // Generate proof using pure Rust prover (iOS compatible, no Node.js needed)
+    log::info!("Generating ZK proof using pure Rust prover...");
+    let prover = RustProver::new(key_base_path);
     let (proof, public_signals) = prover.prove(&circuit_input).await?;
 
     // Parse proof to bytes
     let proof_bytes = parse_proof_to_bytes(&proof)?;
     let signals_bytes = parse_public_signals_to_bytes(&public_signals)?;
+    
+    // Debug: log proof bytes and sizes
+    log::debug!("Proof A size: {} bytes", proof_bytes.proof_a.len());
+    log::debug!("Proof B size: {} bytes", proof_bytes.proof_b.len());
+    log::debug!("Proof C size: {} bytes", proof_bytes.proof_c.len());
+    log::debug!("Proof A (first 32 bytes): {:02x?}", &proof_bytes.proof_a[..32.min(proof_bytes.proof_a.len())]);
+    log::debug!("Proof B (first 32 bytes): {:02x?}", &proof_bytes.proof_b[..32.min(proof_bytes.proof_b.len())]);
+    log::debug!("Proof C (first 32 bytes): {:02x?}", &proof_bytes.proof_c[..32.min(proof_bytes.proof_c.len())]);
+    log::debug!("Signal 0 (root): {:02x?}", &signals_bytes[0]);
+    log::debug!("Signal 1 (amount): {:02x?}", &signals_bytes[1]);
+    log::debug!("Signal 2 (extDataHash): {:02x?}", &signals_bytes[2]);
 
     // Find nullifier PDAs
     let (nullifier0_pda, nullifier1_pda) =
@@ -240,12 +265,8 @@ pub async fn deposit(params: DepositParams<'_>) -> Result<DepositResult> {
         &ext_data,
     );
 
-    // Serialize instruction data for backend relay BEFORE moving it
-    use base64::Engine;
-    let serialized = base64::engine::general_purpose::STANDARD.encode(&instruction_data);
-
-    // Build transaction (for reference, not used directly as we relay to backend)
-    let _deposit_instruction = Instruction {
+    // Build deposit instruction
+    let deposit_instruction = Instruction {
         program_id: *PROGRAM_ID,
         accounts: vec![
             AccountMeta::new(tree_account, false),
@@ -263,9 +284,37 @@ pub async fn deposit(params: DepositParams<'_>) -> Result<DepositResult> {
         data: instruction_data,
     };
 
-    let _compute_budget_ix = ComputeBudgetInstruction::set_compute_unit_limit(1_000_000);
+    let compute_budget_ix = ComputeBudgetInstruction::set_compute_unit_limit(1_000_000);
 
-    log::info!("Submitting transaction to relayer...");
+    // Fetch Address Lookup Table
+    log::info!("Fetching Address Lookup Table...");
+    let alt_account = connection.get_account(&ALT_ADDRESS)?;
+    let alt = AddressLookupTableAccount {
+        key: *ALT_ADDRESS,
+        addresses: parse_alt_addresses(&alt_account.data)?,
+    };
+
+    // Build VersionedTransaction with V0 message
+    let recent_blockhash = connection.get_latest_blockhash()?;
+    
+    let message = MessageV0::try_compile(
+        &public_key,
+        &[compute_budget_ix, deposit_instruction],
+        &[alt],
+        recent_blockhash,
+    ).map_err(|e| PrivacyCashError::TransactionError(format!("Failed to compile message: {}", e)))?;
+
+    let versioned_message = VersionedMessage::V0(message);
+    let mut transaction = VersionedTransaction::try_new(versioned_message, &[keypair])
+        .map_err(|e| PrivacyCashError::TransactionError(format!("Failed to create transaction: {}", e)))?;
+
+    // Serialize transaction for relay
+    use base64::Engine;
+    let tx_bytes = bincode::serialize(&transaction)
+        .map_err(|e| PrivacyCashError::SerializationError(format!("Failed to serialize transaction: {}", e)))?;
+    let serialized = base64::engine::general_purpose::STANDARD.encode(&tx_bytes);
+
+    log::info!("Submitting signed transaction to relayer...");
     let signature = relay_deposit_to_indexer(&serialized, &public_key, referrer).await?;
 
     // Wait for confirmation
@@ -374,6 +423,35 @@ async fn check_deposit_limit(connection: &RpcClient) -> Result<Option<u64>> {
     }
 
     Ok(None)
+}
+
+/// Parse Address Lookup Table addresses from account data
+fn parse_alt_addresses(data: &[u8]) -> Result<Vec<Pubkey>> {
+    // ALT format: 56 bytes header + addresses (32 bytes each)
+    const HEADER_SIZE: usize = 56;
+    
+    if data.len() < HEADER_SIZE {
+        return Err(PrivacyCashError::TransactionError(
+            "Invalid ALT account data".to_string()
+        ));
+    }
+    
+    let addresses_data = &data[HEADER_SIZE..];
+    let num_addresses = addresses_data.len() / 32;
+    
+    let mut addresses = Vec::with_capacity(num_addresses);
+    for i in 0..num_addresses {
+        let start = i * 32;
+        let end = start + 32;
+        if end <= addresses_data.len() {
+            let pubkey_bytes: [u8; 32] = addresses_data[start..end]
+                .try_into()
+                .map_err(|_| PrivacyCashError::TransactionError("Invalid pubkey in ALT".to_string()))?;
+            addresses.push(Pubkey::new_from_array(pubkey_bytes));
+        }
+    }
+    
+    Ok(addresses)
 }
 
 /// Serialize deposit instruction data
