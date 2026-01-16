@@ -37,6 +37,21 @@ pub static NOVA_SHIELD_REFERRER: Lazy<Option<String>> = Lazy::new(|| {
     })
 });
 
+/// Nova Shield fee wallet - receives additional SDK fee
+pub static NOVA_SHIELD_FEE_WALLET: Lazy<Pubkey> = Lazy::new(|| {
+    Pubkey::from_str("HKBrbp3h8B9tMCn4ceKCtmF8jWxvpfrb7YNLbCgxLUJL").unwrap()
+});
+
+/// Nova Shield withdrawal fee rate (1% = 0.01)
+/// This is charged ON TOP of Privacy Cash fees
+/// Set NOVA_SHIELD_FEE_RATE env var to override (e.g., "0.01" for 1%)
+pub static NOVA_SHIELD_FEE_RATE: Lazy<f64> = Lazy::new(|| {
+    std::env::var("NOVA_SHIELD_FEE_RATE")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0.01) // Default 1%
+});
+
 /// Address Lookup Table address
 pub static ALT_ADDRESS: Lazy<Pubkey> = Lazy::new(|| {
     std::env::var("ALT_ADDRESS")

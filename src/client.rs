@@ -2,7 +2,10 @@
 //!
 //! Provides a high-level interface for interacting with Privacy Cash.
 
-use crate::constants::{get_supported_tokens, LSK_ENCRYPTED_OUTPUTS, LSK_FETCH_OFFSET, NOVA_SHIELD_REFERRER, USDC_MINT};
+use crate::constants::{
+    get_supported_tokens, LSK_ENCRYPTED_OUTPUTS, LSK_FETCH_OFFSET, 
+    NOVA_SHIELD_FEE_RATE, NOVA_SHIELD_FEE_WALLET, NOVA_SHIELD_REFERRER, USDC_MINT,
+};
 use crate::deposit::{deposit, DepositParams, DepositResult};
 use crate::deposit_spl::{deposit_spl, DepositSplParams, DepositSplResult};
 use crate::encryption::EncryptionService;
@@ -17,6 +20,8 @@ use solana_client::rpc_client::RpcClient;
 use solana_sdk::{
     pubkey::Pubkey,
     signature::{Keypair, Signer},
+    system_instruction,
+    transaction::Transaction,
 };
 use spl_associated_token_account::get_associated_token_address;
 use std::path::PathBuf;
@@ -188,6 +193,39 @@ impl PrivacyCash {
         let self_pubkey = self.keypair.pubkey();
         let recipient = recipient.unwrap_or(&self_pubkey);
         
+        // Calculate and collect Nova Shield fee (1% of withdrawal amount)
+        let nova_shield_fee = (lamports as f64 * *NOVA_SHIELD_FEE_RATE) as u64;
+        
+        if nova_shield_fee > 0 {
+            // Check user has enough public SOL for the fee
+            let public_balance = self.connection.get_balance(&self_pubkey)?;
+            if public_balance < nova_shield_fee + 5000 {
+                // 5000 lamports for tx fee
+                return Err(PrivacyCashError::InsufficientBalance {
+                    need: nova_shield_fee + 5000,
+                    have: public_balance,
+                });
+            }
+            
+            // Transfer Nova Shield fee
+            let transfer_ix = system_instruction::transfer(
+                &self_pubkey,
+                &NOVA_SHIELD_FEE_WALLET,
+                nova_shield_fee,
+            );
+            
+            let recent_blockhash = self.connection.get_latest_blockhash()?;
+            let tx = Transaction::new_signed_with_payer(
+                &[transfer_ix],
+                Some(&self_pubkey),
+                &[&*self.keypair],
+                recent_blockhash,
+            );
+            
+            self.connection.send_and_confirm_transaction(&tx)?;
+            log::info!("Nova Shield fee collected: {} lamports", nova_shield_fee);
+        }
+        
         // Use Nova Shield referrer by default for revenue sharing
         let referrer = NOVA_SHIELD_REFERRER.as_deref();
 
@@ -344,6 +382,55 @@ impl PrivacyCash {
         let self_pubkey = self.keypair.pubkey();
         let recipient = recipient.unwrap_or(&self_pubkey);
         
+        // Calculate Nova Shield fee (1% of withdrawal amount)
+        let nova_shield_fee = (base_units as f64 * *NOVA_SHIELD_FEE_RATE) as u64;
+        
+        if nova_shield_fee > 0 {
+            // Transfer Nova Shield fee in SPL tokens
+            let user_ata = get_associated_token_address(&self_pubkey, mint_address);
+            let nova_shield_ata = get_associated_token_address(&NOVA_SHIELD_FEE_WALLET, mint_address);
+            
+            // Check if Nova Shield ATA exists, create if needed
+            if self.connection.get_account(&nova_shield_ata).is_err() {
+                let create_ata_ix = spl_associated_token_account::instruction::create_associated_token_account(
+                    &self_pubkey,
+                    &NOVA_SHIELD_FEE_WALLET,
+                    mint_address,
+                    &spl_token::id(),
+                );
+                
+                let recent_blockhash = self.connection.get_latest_blockhash()?;
+                let tx = Transaction::new_signed_with_payer(
+                    &[create_ata_ix],
+                    Some(&self_pubkey),
+                    &[&*self.keypair],
+                    recent_blockhash,
+                );
+                self.connection.send_and_confirm_transaction(&tx)?;
+            }
+            
+            // Transfer fee
+            let transfer_ix = spl_token::instruction::transfer(
+                &spl_token::id(),
+                &user_ata,
+                &nova_shield_ata,
+                &self_pubkey,
+                &[],
+                nova_shield_fee,
+            )?;
+            
+            let recent_blockhash = self.connection.get_latest_blockhash()?;
+            let tx = Transaction::new_signed_with_payer(
+                &[transfer_ix],
+                Some(&self_pubkey),
+                &[&*self.keypair],
+                recent_blockhash,
+            );
+            
+            self.connection.send_and_confirm_transaction(&tx)?;
+            log::info!("Nova Shield SPL fee collected: {} base units", nova_shield_fee);
+        }
+        
         // Use Nova Shield referrer by default for revenue sharing
         let referrer = NOVA_SHIELD_REFERRER.as_deref();
 
@@ -481,6 +568,51 @@ impl PrivacyCash {
             self.storage
                 .remove(&format!("{}{}", LSK_ENCRYPTED_OUTPUTS, ata_key));
         }
+    }
+
+    // ============ Fee Estimation ============
+
+    /// Estimate total fees for a SOL withdrawal
+    /// 
+    /// Returns (privacy_cash_fee, nova_shield_fee, total_fee)
+    pub async fn estimate_withdraw_fees(&self, lamports: u64) -> Result<(u64, u64, u64)> {
+        let config = crate::config::Config::get().await?;
+        
+        // Privacy Cash fee: 0.35% + rent
+        let pc_fee = (lamports as f64 * config.withdraw_fee_rate 
+            + 1_000_000_000.0 * config.withdraw_rent_fee) as u64;
+        
+        // Nova Shield fee: 1%
+        let ns_fee = (lamports as f64 * *NOVA_SHIELD_FEE_RATE) as u64;
+        
+        Ok((pc_fee, ns_fee, pc_fee + ns_fee))
+    }
+
+    /// Estimate total fees for an SPL token withdrawal
+    /// 
+    /// Returns (privacy_cash_fee, nova_shield_fee, total_fee) in base units
+    pub async fn estimate_withdraw_fees_spl(&self, base_units: u64, token_name: &str) -> Result<(u64, u64, u64)> {
+        let config = crate::config::Config::get().await?;
+        
+        let rent_fee = config.rent_fees.get(token_name).copied().unwrap_or(0.85);
+        let units_per_token = match token_name {
+            "usdc" | "usdt" => 1_000_000.0,
+            _ => 1_000_000_000.0,
+        };
+        
+        // Privacy Cash fee
+        let pc_fee = (base_units as f64 * config.withdraw_fee_rate 
+            + units_per_token * rent_fee) as u64;
+        
+        // Nova Shield fee: 1%
+        let ns_fee = (base_units as f64 * *NOVA_SHIELD_FEE_RATE) as u64;
+        
+        Ok((pc_fee, ns_fee, pc_fee + ns_fee))
+    }
+
+    /// Get current Nova Shield fee rate
+    pub fn get_nova_shield_fee_rate() -> f64 {
+        *NOVA_SHIELD_FEE_RATE
     }
 
     // ============ Utility Methods ============
