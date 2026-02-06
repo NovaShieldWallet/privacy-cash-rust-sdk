@@ -21,7 +21,7 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-privacy-cash = { git = "https://github.com/NovaShieldWallet/privacy-cash-rust-sdk" }
+privacy-cash = "1.0"
 tokio = { version = "1", features = ["full"] }
 ```
 

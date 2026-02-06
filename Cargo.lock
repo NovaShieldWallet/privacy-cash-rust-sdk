@@ -209,8 +209,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "ark-circom"
-version = "0.1.0"
+name = "ark-circom-solana"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "69d698058de3e514fd620396823dce75d465c1470036ccc5ce68043856014886"
 dependencies = [
  "ark-bn254",
  "ark-crypto-primitives",
@@ -3676,12 +3678,12 @@ dependencies = [
 
 [[package]]
 name = "privacy-cash"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "aes",
  "aes-gcm",
  "ark-bn254",
- "ark-circom",
+ "ark-circom-solana",
  "ark-crypto-primitives",
  "ark-ec",
  "ark-ff",

@@ -88,8 +88,7 @@ ark-ec = "0.4"
 ark-crypto-primitives = "0.4"
 
 # Patched ark-circom - uses ark-ff 0.4.x for Solana SDK compatibility
-# Local path for development, git for publishing
-ark-circom = { path = "vendor/ark-circom-0.1.0", features = ["circom-2"] }
+ark-circom-solana = { version = "0.4", features = ["circom-2"] }
 
 [dev-dependencies]
 tokio-test = "0.4"

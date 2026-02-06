@@ -8,7 +8,7 @@
 use crate::error::{PrivacyCashError, Result};
 use crate::prover::{CircuitInput, Proof};
 use ark_bn254::{Bn254, Fr};
-use ark_circom::{read_zkey, CircomReduction, WitnessCalculator};
+use ark_circom_solana::{read_zkey, CircomReduction, WitnessCalculator};
 use ark_groth16::Groth16;
 use ark_std::rand::thread_rng;
 use num_bigint::BigUint;
