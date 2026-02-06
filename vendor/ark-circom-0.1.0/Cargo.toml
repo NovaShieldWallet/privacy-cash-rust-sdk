@@ -11,11 +11,14 @@
 
 [package]
 edition = "2018"
-name = "ark-circom"
-version = "0.1.0"
-description = "Arkworks bindings to Circom's R1CS, for Groth16 Proof and Witness generation in Rust"
+name = "ark-circom-solana"
+version = "0.4.0"
+description = "Arkworks bindings to Circom's R1CS, for Groth16 Proof and Witness generation in Rust. Fork with ark-ff 0.4 compatibility for Solana SDK."
 readme = "README.md"
 license = "MIT OR Apache-2.0"
+repository = "https://github.com/NovaShieldWallet/privacy-cash-rust-sdk"
+keywords = ["circom", "groth16", "zksnark", "solana", "arkworks"]
+categories = ["cryptography"]
 
 [lib]
 crate-type = [
