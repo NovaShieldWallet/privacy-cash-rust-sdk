@@ -1,0 +1,13 @@
+# Cargo configuration for privacy-cash-rust-sdk
+#
+# Suppress warnings during builds for a cleaner output experience.
+# The vendored ark-circom crate has some harmless warnings that clutter the output.
+
+[build]
+# Suppress all warnings during cargo build/run
+# Comment this out if you want to see warnings during development
+rustflags = ["-Awarnings"]
+
+[term]
+# Use colors in terminal output
+color = "always"

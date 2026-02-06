@@ -14,10 +14,6 @@
 # Cache files
 /cache/
 
-# Circuit files (too large for git, download separately)
-/circuit/*.wasm
-/circuit/*.zkey
-
 # Environment files
 .env
 .env.local

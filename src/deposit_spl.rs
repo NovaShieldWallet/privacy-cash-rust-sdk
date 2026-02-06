@@ -314,35 +314,70 @@ pub async fn deposit_spl(params: DepositSplParams<'_>) -> Result<DepositSplResul
         addresses: parse_alt_addresses(&alt_account.data)?,
     };
 
-    // Build VersionedTransaction with V0 message
-    let recent_blockhash = connection.get_latest_blockhash()?;
+    // Retry loop for transaction submission (handles blockhash expiration)
+    let max_retries = 3;
+    let mut last_error = None;
+    let mut signature = String::new();
     
-    let message = MessageV0::try_compile(
-        &public_key,
-        &[compute_budget_ix, deposit_instruction],
-        &[alt],
-        recent_blockhash,
-    ).map_err(|e| PrivacyCashError::TransactionError(format!("Failed to compile message: {}", e)))?;
+    for attempt in 0..max_retries {
+        if attempt > 0 {
+            log::warn!("Retrying transaction (attempt {}/{}), fetching fresh blockhash...", attempt + 1, max_retries);
+            // Small delay before retry to allow network conditions to stabilize
+            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+        }
 
-    let versioned_message = VersionedMessage::V0(message);
-    let transaction = VersionedTransaction::try_new(versioned_message, &[keypair])
-        .map_err(|e| PrivacyCashError::TransactionError(format!("Failed to create transaction: {}", e)))?;
+        // Get fresh blockhash for each attempt
+        let recent_blockhash = connection.get_latest_blockhash()?;
+        
+        let message = MessageV0::try_compile(
+            &public_key,
+            &[compute_budget_ix.clone(), deposit_instruction.clone()],
+            &[alt.clone()],
+            recent_blockhash,
+        ).map_err(|e| PrivacyCashError::TransactionError(format!("Failed to compile message: {}", e)))?;
 
-    // Serialize transaction for relay
-    use base64::Engine;
-    let tx_bytes = bincode::serialize(&transaction)
-        .map_err(|e| PrivacyCashError::SerializationError(format!("Failed to serialize transaction: {}", e)))?;
-    let serialized = base64::engine::general_purpose::STANDARD.encode(&tx_bytes);
+        let versioned_message = VersionedMessage::V0(message);
+        let transaction = VersionedTransaction::try_new(versioned_message, &[keypair])
+            .map_err(|e| PrivacyCashError::TransactionError(format!("Failed to create transaction: {}", e)))?;
 
-    // Relay to backend
-    log::info!("Submitting transaction to relayer...");
-    let signature = relay_spl_deposit_to_indexer(
-        &serialized,
-        &public_key,
-        mint_address,
-        referrer,
-    )
-    .await?;
+        // Serialize transaction for relay
+        use base64::Engine;
+        let tx_bytes = bincode::serialize(&transaction)
+            .map_err(|e| PrivacyCashError::SerializationError(format!("Failed to serialize transaction: {}", e)))?;
+        let serialized = base64::engine::general_purpose::STANDARD.encode(&tx_bytes);
+
+        // Relay to backend
+        log::info!("Submitting transaction to relayer...");
+        
+        match relay_spl_deposit_to_indexer(
+            &serialized,
+            &public_key,
+            mint_address,
+            referrer,
+        ).await {
+            Ok(sig) => {
+                signature = sig;
+                last_error = None;
+                break;
+            }
+            Err(e) => {
+                let error_str = format!("{}", e);
+                // Check if this is a blockhash expiration error
+                if error_str.contains("block height exceeded") || error_str.contains("expired") {
+                    log::warn!("Transaction blockhash expired, will retry with fresh blockhash");
+                    last_error = Some(e);
+                    continue;
+                }
+                // For other errors, fail immediately
+                return Err(e);
+            }
+        }
+    }
+    
+    // If we exhausted retries, return the last error
+    if let Some(err) = last_error {
+        return Err(err);
+    }
 
     // Wait for confirmation
     log::info!("Waiting for confirmation...");

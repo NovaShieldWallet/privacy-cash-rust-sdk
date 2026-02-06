@@ -28,25 +28,32 @@ pub static FEE_RECIPIENT: Lazy<Pubkey> = Lazy::new(|| {
     Pubkey::from_str("AWexibGxNFKTa1b5R5MN4PJr9HWnWRwf8EW9g8cLx3dM").unwrap()
 });
 
-/// Nova Shield referrer wallet - earns referral fees on all transactions
-/// Set NOVA_SHIELD_REFERRER env var to override, or None to disable
-pub static NOVA_SHIELD_REFERRER: Lazy<Option<String>> = Lazy::new(|| {
-    std::env::var("NOVA_SHIELD_REFERRER").ok().or_else(|| {
-        // Nova Shield wallet receives referral fees from Privacy Cash
+/// Partner/Platform referrer wallet - earns referral fees on all transactions
+/// Set PARTNER_REFERRER env var to your wallet address, or leave empty to use default
+pub static PARTNER_REFERRER: Lazy<Option<String>> = Lazy::new(|| {
+    std::env::var("PARTNER_REFERRER").ok().or_else(|| {
+        // Default referrer wallet - set PARTNER_REFERRER env var to use your own
         Some("HKBrbp3h8B9tMCn4ceKCtmF8jWxvpfrb7YNLbCgxLUJL".to_string())
     })
 });
 
-/// Nova Shield fee wallet - receives additional SDK fee
-pub static NOVA_SHIELD_FEE_WALLET: Lazy<Pubkey> = Lazy::new(|| {
-    Pubkey::from_str("HKBrbp3h8B9tMCn4ceKCtmF8jWxvpfrb7YNLbCgxLUJL").unwrap()
+/// Partner/Platform fee wallet - receives additional SDK integration fee
+/// Set PARTNER_FEE_WALLET env var to your wallet address
+pub static PARTNER_FEE_WALLET: Lazy<Pubkey> = Lazy::new(|| {
+    std::env::var("PARTNER_FEE_WALLET")
+        .ok()
+        .and_then(|s| Pubkey::from_str(&s).ok())
+        .unwrap_or_else(|| {
+            // Default fee wallet - set PARTNER_FEE_WALLET env var to use your own
+            Pubkey::from_str("HKBrbp3h8B9tMCn4ceKCtmF8jWxvpfrb7YNLbCgxLUJL").unwrap()
+        })
 });
 
-/// Nova Shield withdrawal fee rate (1% = 0.01)
-/// This is charged ON TOP of Privacy Cash fees
-/// Set NOVA_SHIELD_FEE_RATE env var to override (e.g., "0.01" for 1%)
-pub static NOVA_SHIELD_FEE_RATE: Lazy<f64> = Lazy::new(|| {
-    std::env::var("NOVA_SHIELD_FEE_RATE")
+/// Partner/Platform withdrawal fee rate (1% = 0.01)
+/// This is charged ON TOP of Privacy Cash protocol fees
+/// Set PARTNER_FEE_RATE env var to override (e.g., "0.005" for 0.5%, "0" to disable)
+pub static PARTNER_FEE_RATE: Lazy<f64> = Lazy::new(|| {
+    std::env::var("PARTNER_FEE_RATE")
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(0.01) // Default 1%

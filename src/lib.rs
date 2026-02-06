@@ -1,16 +1,14 @@
 //! # Privacy Cash Rust SDK
 //!
-//! **Pure Rust** SDK for Privacy Cash on Solana.
+//! **Pure Rust** SDK for [Privacy Cash](https://www.privacycash.org) on Solana.
 //! Privacy-preserving transactions using Zero-Knowledge Proofs.
-//! 
-//! **iOS Compatible** - No Node.js required!
 //!
 //! ## Features
 //!
-//! - 🔒 **Private Transactions**: Send SOL and SPL tokens with complete privacy
-//! - 🛡️ **Pure Rust ZK Proofs**: Native Groth16 proof generation
-//! - 📱 **iOS Compatible**: Use as a Rust crate in mobile apps
-//! - 💰 **Multi-Token Support**: SOL, USDC, USDT
+//! - **Private Transactions**: Send SOL and SPL tokens with complete privacy
+//! - **Pure Rust ZK Proofs**: Native Groth16 proof generation
+//! - **Multi-Token Support**: SOL, USDC, USDT, and more
+//! - **Partner Fee Integration**: Earn fees by integrating into your platform
 //!
 //! ## Quick Start - ONE Function
 //!
